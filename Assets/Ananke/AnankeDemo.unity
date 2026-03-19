@@ -1,0 +1,17 @@
+// This file is a placeholder. Unity scene files (.unity) are binary YAML
+// and must be created from within the Unity Editor.
+//
+// To create the AnankeDemo scene:
+//
+//   1. Open this project in Unity 6.
+//   2. Create a new scene: File > New Scene > Basic (Built-in).
+//   3. Add an empty GameObject named "AnankeController".
+//   4. Add the Ananke/AnankeController component to it.
+//   5. Create two capsule GameObjects: "Entity1" (position 0,0,0) and
+//      "Entity2" (position 0.6,0,0) to represent the two combatants.
+//   6. Assign Entity1 and Entity2 to the "Entity Objects" array in the
+//      AnankeController Inspector.
+//   7. Save the scene as Assets/Ananke/AnankeDemo.unity.
+//
+// The sidecar must be running before you press Play:
+//   cd sidecar && npm start
