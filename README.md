@@ -1,150 +1,303 @@
 # ananke-unity-reference
 
-Unity 6 humanoid rig plugin driven by the [Ananke](https://github.com/its-not-rocket-science/ananke) physics simulation engine.
+![Ananke version](https://img.shields.io/badge/ananke-0.1.0-6366f1)
+![Unity](https://img.shields.io/badge/Unity-6%2B-000000?logo=unity&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)
+![C#](https://img.shields.io/badge/C%23-11-239120?logo=csharp&logoColor=white)
+![Status](https://img.shields.io/badge/status-reference%20implementation-orange)
 
-## What it is
+Minimal runnable Unity 6 plugin that drives a humanoid character rig from Ananke's physics simulation. This is the canonical reference implementation for Unity integrators. Once complete, it will be listed in [Ananke's ecosystem.md](https://github.com/its-not-rocket-science/ananke/blob/master/docs/ecosystem.md).
 
-This project demonstrates how to drive a Unity 6 scene with deterministic, physics-grounded character simulation from Ananke. Ananke runs in a Node.js sidecar process and exposes simulation state over HTTP (and eventually WebSocket). Unity polls the sidecar at 20 Hz, reads entity positions and animation state, and renders the result at 60 Hz.
+---
 
-Simulation physics — impact energy, injury regions, stamina, grapple constraints, shock — are computed entirely by Ananke. Unity is a pure renderer.
+## Table of contents
 
-## Architecture
+1. [Purpose](#purpose)
+2. [Prerequisites](#prerequisites)
+3. [Architecture](#architecture)
+4. [What gets built](#what-gets-built)
+5. [Quick start](#quick-start)
+6. [File layout](#file-layout)
+7. [Ananke API surface used](#ananke-api-surface-used)
+8. [Tick interpolation strategy](#tick-interpolation-strategy)
+9. [Demo scene](#demo-scene)
+10. [API compliance checklist](#api-compliance-checklist)
+11. [Contributing](#contributing)
 
-```
-┌─────────────────────────────────┐       HTTP / WebSocket (localhost:3001)
-│  Node.js sidecar  (20 Hz)       │ ─────────────────────────────────────►
-│  @its-not-rocket-science/ananke │                                        │
-│  stepWorld → extractRigSnapshots│ ◄─────────────────────────────────────
-│  GET /state  GET /health        │       JSON snapshot (positions, anim)
-└─────────────────────────────────┘
+---
 
-                                        ┌──────────────────────────────────┐
-                                        │  Unity 6 scene  (60 Hz)          │
-                                        │  AnankeController.cs             │
-                                        │  UnityWebRequest  (20 Hz)        │
-                                        │  moves GameObjects               │
-                                        │  drives Animator parameters      │
-                                        └──────────────────────────────────┘
-```
+## Purpose
 
-The tick rate for Ananke is 20 Hz (matching `TICK_HZ` in the engine). Unity renders at 60 Hz; smooth motion between ticks uses Unity's `Time.deltaTime` accumulation against the `interpolation_factor` field in the snapshot.
+Ananke is a headless simulation kernel that outputs structured data at 20 Hz: entity positions, injury state, animation hints, and grapple constraints. This project wires that data to a Unity 6 humanoid skeleton.
+
+It is deliberately minimal: one demo scene, one C# receiver, one TypeScript sidecar. No custom physics override, no editor extension, no asset pipeline. The goal is a working Knight vs Brawler duel that any Unity developer can clone and play within five minutes.
+
+---
 
 ## Prerequisites
 
-- [Unity 6](https://unity.com/releases/unity-6) (6000.0 or later)
-- Node.js 18 or later
-- npm 9 or later
+| Dependency | Minimum version | Notes |
+|-----------|----------------|-------|
+| Unity | 6 (6000.0 LTS) | Universal Render Pipeline recommended |
+| Ananke | 0.1.0 | Cloned alongside this repo |
+| Node.js | 18 | For the TypeScript sidecar |
+| npm | 9 | Bundled with Node.js 18 |
+| .NET | 8 | Comes with Unity 6 |
+
+Clone Ananke into a sibling directory before cloning this project:
+
+```
+workspace/
+  ananke/                      ← https://github.com/its-not-rocket-science/ananke
+  ananke-unity-reference/      ← this repo
+```
+
+The sidecar imports from `../ananke/dist/src/...` until Ananke is published to npm.
+
+---
+
+## Architecture
+
+The integration uses a **TypeScript sidecar ↔ Unity** channel. The sidecar owns the simulation; Unity owns the renderer. Unity does not have a built-in WebSocket server, so the sidecar runs an HTTP server and Unity polls it via `UnityWebRequest`, or the sidecar and Unity communicate over a named pipe.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  TypeScript sidecar (Node.js, 20 Hz)                     │
+│                                                          │
+│  stepWorld() ──► extractRigSnapshots()                   │
+│               ──► deriveAnimationHints()                 │
+│               ──► derivePoseModifiers()                  │
+│               ──► deriveGrappleConstraint()              │
+│               ──► serializeReplay() [optional]           │
+│                                 │                        │
+│              HTTP POST /frame   │   OR named pipe        │
+│              http://127.0.0.1:7374                       │
+└─────────────────────────────────┼────────────────────────┘
+                                  │
+┌─────────────────────────────────▼────────────────────────┐
+│  Unity 6 (C#, FixedUpdate 50 Hz / Update display Hz)     │
+│                                                          │
+│  AnankeReceiver.cs     HTTP/pipe client + JSON parse     │
+│  AnankeInterpolator.cs Snapshot buffer + lerp            │
+│  SkeletonMapper.cs     Segment ID → HumanBodyBones       │
+│  AnimationDriver.cs    AnimationHints → Animator params  │
+│  GrappleApplicator.cs  GrappleConstraint → constraints   │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Why HTTP and not WebSocket?
+
+Unity 6 supports `ClientWebSocket` in C# but requires careful threading to avoid blocking the main thread. HTTP polling with `UnityWebRequest` is simpler to set up for a reference implementation. The sidecar queues the latest frame; Unity fetches it at `FixedUpdate` rate. The latency is one HTTP round-trip (~0.5 ms on loopback), negligible for visual fidelity.
+
+If you need lower latency or bidirectional commands (e.g., for player input), replace the HTTP channel with a named pipe or a dedicated WebSocket pair.
+
+---
+
+## What gets built
+
+### Skeleton bone mapping
+
+`SkeletonMapper.cs` maps Ananke's segment IDs to Unity's `HumanBodyBones` enum:
+
+| Ananke segment | Unity HumanBodyBones |
+|---------------|---------------------|
+| `head`        | `HumanBodyBones.Head` |
+| `torso`       | `HumanBodyBones.Spine` |
+| `leftArm`     | `HumanBodyBones.LeftUpperArm` |
+| `rightArm`    | `HumanBodyBones.RightUpperArm` |
+| `leftLeg`     | `HumanBodyBones.LeftUpperLeg` |
+| `rightLeg`    | `HumanBodyBones.RightUpperLeg` |
+
+```csharp
+// SkeletonMapper.cs
+public static HumanBodyBones Resolve(string segmentId) => segmentId switch {
+    "head"     => HumanBodyBones.Head,
+    "torso"    => HumanBodyBones.Spine,
+    "leftArm"  => HumanBodyBones.LeftUpperArm,
+    "rightArm" => HumanBodyBones.RightUpperArm,
+    "leftLeg"  => HumanBodyBones.LeftUpperLeg,
+    "rightLeg" => HumanBodyBones.RightUpperLeg,
+    _          => HumanBodyBones.LastBone, // unmapped
+};
+```
+
+Override this mapping in the `AnankeSkeletonConfig` ScriptableObject if your rig uses different bone names.
+
+### Animator state machine
+
+`AnimationDriver.cs` reads `primaryState` from `AnimationHints` and sets an `Animator` parameter. Wire this parameter to a state machine in your `AnimatorController`:
+
+```csharp
+// AnimationDriver.cs
+void ApplyHints(AnankeAnimationHints hints) {
+    _animator.SetTrigger(hints.primaryState); // "idle", "attack", "flee", "prone", etc.
+    _animator.SetFloat("injuryBlend", hints.injuryWeight);
+    _animator.SetBool("isConscious",  hints.consciousness > 0.1f);
+}
+```
+
+### Physics Rigidbody (optional)
+
+Ananke computes world-space positions. Unity's `Rigidbody` is not needed for rendering — simply set `transform.position` from the interpolated snapshot. If your game needs Unity physics collision (e.g., for player camera blocking), attach a kinematic `Rigidbody` and use `MovePosition`:
+
+```csharp
+_rigidbody.MovePosition(interpolatedPosition);
+```
+
+Do not give the Rigidbody `isKinematic = false` — Ananke owns all simulation physics.
+
+---
 
 ## Quick start
 
-**1. Start the sidecar**
-
 ```bash
-cd sidecar
-npm install
-npm start
-# Sidecar listens on http://localhost:3001
-# GET /health  →  { "ok": true }
-# GET /state   →  JSON snapshot array
+# 1. Clone Ananke
+git clone https://github.com/its-not-rocket-science/ananke.git
+cd ananke && npm install && npm run build && cd ..
+
+# 2. Clone this repo
+git clone https://github.com/its-not-rocket-science/ananke-unity-reference.git
+cd ananke-unity-reference
+
+# 3. Install sidecar dependencies
+cd sidecar && npm install && cd ..
+
+# 4. Start the sidecar
+npm run sidecar
+# Prints: "Ananke sidecar ready at http://127.0.0.1:7374"
+
+# 5. Open the Unity project
+# Unity Hub → Open → select unity/ folder
+# Open Scenes/Demo.unity → Press Play
 ```
 
-**2. Open the Unity project**
+The demo scene opens a viewport with two characters. The sidecar runs the Knight vs Brawler scenario and serves frames to Unity.
 
-Open Unity Hub, click "Open", and select the root folder of this repository.
-Unity will import the project and detect `ProjectSettings/ProjectVersion.txt`.
+---
 
-**3. Run the AnankeDemo scene**
+## File layout
 
-Open `Assets/Ananke/AnankeDemo.unity` in Unity and press Play. Two placeholder
-capsules should move to match the Ananke simulation output.
-
-> Note: `AnankeDemo.unity` is a placeholder text file. Open Unity, create a new
-> scene, add the `AnankeController` MonoBehaviour to an empty GameObject, and
-> save it as `AnankeDemo.unity`. See M1 in ROADMAP.md.
-
-## Snapshot JSON shape
-
-`GET /state` returns an array of `AnankeSnapshot` objects:
-
-```jsonc
-[
-  {
-    "entityId": 1,
-    "teamId": 1,
-    "tick": 42,
-    // World-space position in real metres (converted from Ananke fixed-point).
-    "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-    "animation": {
-      // Locomotion blend — exactly one is SCALE.Q (18000) when mobile.
-      "idle":      18000,
-      "walk":      0,
-      "run":       0,
-      "sprint":    0,
-      "crawl":     0,
-      // Combat blend weights — nonzero during guard/attack.
-      "guardingQ":  0,
-      "attackingQ": 0,
-      // Condition overlays.
-      "shockQ":     1200,
-      "fearQ":      0,
-      // State flags.
-      "prone":      false,
-      "unconscious": false,
-      "dead":       false
-    },
-    "pose": [
-      { "segmentId": "thorax", "impairmentQ": 4500, "structuralQ": 0, "surfaceQ": 4500 }
-    ],
-    "grapple": {
-      "isHolder": false,
-      "isHeld": false,
-      "heldByIds": [],
-      "position": "standing",
-      "gripQ": 0
-    }
-  }
-]
+```
+ananke-unity-reference/
+├── sidecar/                        TypeScript sidecar (Node.js)
+│   ├── src/
+│   │   ├── main.ts                 Entry: sim loop + HTTP server
+│   │   ├── scenario.ts             Knight vs Brawler setup
+│   │   ├── serialiser.ts           Frame → JSON for Unity
+│   │   └── replay.ts               Optional replay recording
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── unity/                          Unity 6 project
+│   ├── Assets/
+│   │   ├── AnankePlugin/
+│   │   │   ├── Runtime/
+│   │   │   │   ├── AnankeReceiver.cs        HTTP client + JSON parse
+│   │   │   │   ├── AnankeInterpolator.cs    Snapshot buffer + lerp
+│   │   │   │   ├── SkeletonMapper.cs        Segment → HumanBodyBones
+│   │   │   │   ├── AnimationDriver.cs       Hints → Animator params
+│   │   │   │   ├── GrappleApplicator.cs     Constraint → joint locks
+│   │   │   │   └── AnankeSkeletonConfig.cs  ScriptableObject override
+│   │   │   └── Editor/
+│   │   │       └── AnankePluginEditor.cs    Inspector helpers
+│   │   ├── Scenes/
+│   │   │   └── Demo.unity                   Knight vs Brawler arena
+│   │   ├── Prefabs/
+│   │   │   └── AnankeCharacter.prefab       Rig + driver components
+│   │   └── Models/
+│   │       └── placeholder_humanoid.fbx     CC0 placeholder mesh
+│   └── Packages/
+│       └── manifest.json
+│
+├── docs/
+│   └── bone-mapping-guide.md
+└── README.md
 ```
 
-All `Q` values use `SCALE.Q = 18000`. The C# helper `AnankeSnapshot.QToFloat(q)` converts to a normalised float.
+---
 
-## AnimationHints → Unity Animator
+## Ananke API surface used
 
-Map the `animation` fields to Unity `Animator` parameters:
+All imports are from Ananke's **Tier 1 (Stable)** surface as documented in
+[`docs/bridge-contract.md`](https://github.com/its-not-rocket-science/ananke/blob/master/docs/bridge-contract.md)
+and [`STABLE_API.md`](https://github.com/its-not-rocket-science/ananke/blob/master/STABLE_API.md).
 
-| Ananke field   | Animator parameter    | Type    | Notes                              |
-|----------------|-----------------------|---------|------------------------------------|
-| `idle`         | `IsIdle`              | Bool    | `animation.idle == 18000`          |
-| `walk`         | `Speed`               | Float   | 0.5 when walking, 1.0 when running |
-| `run`          | `Speed`               | Float   | `run / SCALE_Q`                    |
-| `sprint`       | `IsSprinting`         | Bool    | —                                  |
-| `crawl`        | `IsCrawling`          | Bool    | —                                  |
-| `guardingQ`    | `GuardWeight`         | Float   | `guardingQ / 18000f`               |
-| `attackingQ`   | `IsAttacking`         | Bool    | Nonzero during attack cooldown     |
-| `shockQ`       | `ShockWeight`         | Float   | Drives stagger blend tree          |
-| `prone`        | `IsProne`             | Bool    | —                                  |
-| `unconscious`  | `IsUnconscious`       | Bool    | —                                  |
-| `dead`         | `IsDead`              | Bool    | Triggers death animation           |
+| Ananke export | Used in | Tier |
+|--------------|---------|------|
+| `stepWorld(world, cmds, ctx)` | `sidecar/src/main.ts` | Tier 1 |
+| `generateIndividual(seed, archetype)` | `sidecar/src/scenario.ts` | Tier 1 |
+| `extractRigSnapshots(world)` | `sidecar/src/main.ts` | Tier 1 |
+| `deriveAnimationHints(entity)` | `sidecar/src/serialiser.ts` | Tier 1 |
+| `derivePoseModifiers(entity)` | `sidecar/src/serialiser.ts` | Tier 1 |
+| `deriveGrappleConstraint(entity, world)` | `sidecar/src/serialiser.ts` | Tier 1 |
+| `serializeReplay(replay)` | `sidecar/src/replay.ts` | Tier 1 |
+| `SCALE` | `sidecar/src/serialiser.ts` | Tier 1 |
 
-See `Assets/Ananke/Scripts/AnankeController.cs` for TODO stubs.
+The complete field-by-field contract for `AnimationHints`, `GrapplePoseConstraint`, and
+`InterpolatedState` is documented in
+[`docs/bridge-contract.md`](https://github.com/its-not-rocket-science/ananke/blob/master/docs/bridge-contract.md).
 
-## Fixed-point coordinate conversion
+---
 
-Ananke stores positions as integers: `SCALE.m = 1000`, so `600 = 0.6 m`. The sidecar converts to real metres before sending, so Unity receives `float` metres directly. Axis mapping:
+## Tick interpolation strategy
+
+Unity's `FixedUpdate` runs at 50 Hz (0.02 s) by default, which aligns conveniently with Ananke's 20 Hz (every 2.5 FixedUpdate calls). The interpolator stores the two most recent simulation frames and computes a blend factor `t` in `Update`:
 
 ```csharp
-// Ananke Y-up, Z depth → Unity Y-up
-transform.position = new Vector3(
-    snapshot.position.x,
-    snapshot.position.z,   // Ananke Z = vertical in some configurations
-    snapshot.position.y
-);
+// AnankeInterpolator.cs
+void Update() {
+    float elapsed = Time.time - _prevFrameTime;
+    float interval = _currFrameTime - _prevFrameTime;
+    _t = interval > 0f ? Mathf.Clamp01(elapsed / interval) : 1f;
+}
+
+Vector3 GetPosition(string segmentId) {
+    var prev = _prevFrame.bones[segmentId].position;
+    var curr = _currFrame.bones[segmentId].position;
+    return Vector3.Lerp(prev, curr, _t);
+}
 ```
 
-Adjust the axis mapping to match your scene orientation.
+Positions arrive from the sidecar in metres (already divided by `SCALE.m = 10000`). Boolean flags (`dead`, `unconscious`) snap to the new value when `_t >= 0.5f`. The sidecar does not extrapolate.
 
-## Further reading
+---
 
-- [Ananke on GitHub](https://github.com/its-not-rocket-science/ananke)
-- [docs/bridge-contract.md](https://github.com/its-not-rocket-science/ananke/blob/main/docs/bridge-contract.md) — full bridge API contract
-- [ROADMAP.md](./ROADMAP.md) — implementation milestones
+## Demo scene
+
+The demo scene replicates the Knight vs Brawler scenario from `tools/vertical-slice.ts`:
+
+- **Knight**: plate armour, longsword, high structural integrity
+- **Brawler**: no armour, bare hands, high stamina
+- **Outcome display**: winner, tick count, entity state (shock, fluid loss, consciousness)
+- **Controls**: Space = new seed, R = replay last fight, Escape = quit
+
+The scene is a visual proof, not a game. It shows that Ananke produces physically differentiated outcomes visible in a renderer: armour slows shock accumulation, energy depletes, per-region injury, emergent fight end, consciousness degrades independently.
+
+---
+
+## API compliance checklist
+
+When submitting this project to the Ananke ecosystem, verify the following:
+
+- [ ] No direct imports from `src/sim/kernel.ts` internals (only Stable/Experimental tier exports)
+- [ ] Positions already in metres when they reach C# (divided by `SCALE.m = 10000` in the sidecar)
+- [ ] Interpolation factor `_t` clamped to `[0.0, 1.0]`; no extrapolation unless explicitly opted in
+- [ ] `deriveGrappleConstraint` result checked for `null` before applying joint locks
+- [ ] Boolean flags (`dead`, `unconscious`) snap at `_t >= 0.5f`, not lerped
+- [ ] `serializeReplay` output can be deserialized and replayed deterministically
+- [ ] Demo scene runs 200 ticks without exception on seeds 1, 42, and 99
+- [ ] HTTP connection failure is handled gracefully (Unity shows "waiting for sidecar" overlay)
+- [ ] No `Rigidbody` with `isKinematic = false` on Ananke-controlled entities
+
+---
+
+## Contributing
+
+1. Fork this repository and create a feature branch.
+2. The sidecar must stay under 500 lines of TypeScript. Keep simulation complexity in Ananke.
+3. All new C# files must have an XML summary comment on the class.
+4. Run `npm run typecheck` in `sidecar/` before opening a PR.
+5. If you add a new bone mapping preset, add a corresponding test scene.
+
+To list this project in Ananke's `docs/ecosystem.md`, open a PR to the Ananke repository adding a row to the Renderer Bridges table with a link and a one-line description.
