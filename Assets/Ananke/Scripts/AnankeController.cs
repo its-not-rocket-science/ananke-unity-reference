@@ -1,244 +1,167 @@
-// Assets/Ananke/Scripts/AnankeController.cs
-//
-// MonoBehaviour that polls the Ananke sidecar at 20 Hz, deserialises the JSON
-// snapshot, and moves GameObjects to match simulation positions.
-//
-// Attach to an empty GameObject in the AnankeDemo scene.
-// Assign entity GameObjects in the Inspector.
-//
-// TODO (M2): Drive Animator parameters from AnimationHints fields.
-// TODO (M3): Map pose[].segmentId to HumanBodyBones; drive blend shapes.
-// TODO (M4): Apply RigConstraint (Animation Rigging) from grapple data.
-// TODO (M2 stretch): Replace UnityWebRequest polling with WebSocket push.
-//   Use NativeWebSocket (https://github.com/endel/NativeWebSocket) or the
-//   Unity Netcode transport layer.
-
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace Ananke
 {
     public class AnankeController : MonoBehaviour
     {
-        // ── Inspector fields ──────────────────────────────────────────────────
+        [Header("Scene References")]
+        [Tooltip("Receiver component that maintains the WebSocket connection.")]
+        public AnankeReceiver receiver;
 
-        [Header("Sidecar Connection")]
-        [Tooltip("Base URL of the Ananke sidecar. Must match PORT in sidecar/server.js.")]
-        public string sidecarUrl = "http://127.0.0.1:3001";
-
-        [Tooltip("Poll interval in seconds. 0.05 = 20 Hz (matches simulation tick rate).")]
-        public float pollIntervalSeconds = 0.05f;
-
-        [Header("Entity GameObjects")]
-        [Tooltip("Map entity IDs to scene GameObjects. Index 0 = entity 1, index 1 = entity 2.")]
+        [Tooltip("Optional entity roots. When left empty, placeholder rigs are created automatically.")]
         public GameObject[] entityObjects;
 
-        // ── Private state ─────────────────────────────────────────────────────
+        private readonly Dictionary<int, GameObject> _entityMap = new();
+        private readonly Dictionary<int, Dictionary<string, Transform>> _boneMaps = new();
+        private readonly Dictionary<int, Vector3> _spawnPositions = new();
+        private int _lastAppliedTick = -1;
 
-        /// <summary>Map from entity id to its scene GameObject.</summary>
-        private Dictionary<int, GameObject> _entityMap = new();
-
-        /// <summary>Most recently parsed snapshots.</summary>
-        private AnankeEntitySnapshot[] _latestSnapshots = Array.Empty<AnankeEntitySnapshot>();
-
-        // ── Lifecycle ─────────────────────────────────────────────────────────
-
-        private void Start()
+        private void Awake()
         {
-            // Build entity map.
-            // The array is assumed to be ordered: index 0 → entity id 1, etc.
-            for (int i = 0; i < entityObjects.Length; i++)
-            {
-                if (entityObjects[i] != null)
-                    _entityMap[i + 1] = entityObjects[i];
-            }
+            if (receiver == null)
+                receiver = GetComponent<AnankeReceiver>();
 
-            if (_entityMap.Count == 0)
-                Debug.LogWarning("[AnankeController] No entity GameObjects assigned. Assign them in the Inspector.");
-
-            // Start polling at 20 Hz using InvokeRepeating.
-            // InvokeRepeating calls are reliable across frames unlike Update-based timers.
-            InvokeRepeating(nameof(PollState), 0f, pollIntervalSeconds);
-
-            Debug.Log($"[AnankeController] Polling {sidecarUrl}/state every {pollIntervalSeconds * 1000:F0} ms");
+            EnsureDemoEntities();
         }
 
         private void Update()
         {
-            // Apply the most recently received snapshots every frame.
-            // This runs at render rate (60 Hz) while polling runs at 20 Hz,
-            // so multiple frames may apply the same snapshot until a new one
-            // arrives — which is correct for a hold-last interpolation strategy.
-            //
-            // TODO (M2 stretch): Use Time.deltaTime accumulation against
-            // snapshot.tick and the known TICK_HZ to interpolate position
-            // between the previous and current snapshot for smooth motion.
-            ApplySnapshots(_latestSnapshots);
+            if (receiver == null || receiver.LatestFrame == null)
+                return;
+
+            if (receiver.LatestFrame.tick == _lastAppliedTick)
+                return;
+
+            _lastAppliedTick = receiver.LatestFrame.tick;
+            ApplySnapshots(receiver.LatestFrame.snapshots);
         }
 
-        // ── HTTP polling ──────────────────────────────────────────────────────
-
-        private void PollState()
+        private void EnsureDemoEntities()
         {
-            StartCoroutine(FetchState());
-        }
-
-        private IEnumerator FetchState()
-        {
-            using var request = UnityWebRequest.Get($"{sidecarUrl}/state");
-            request.timeout = 2; // seconds
-
-            yield return request.SendWebRequest();
-
-            if (request.result != UnityWebRequest.Result.Success)
+            if (entityObjects != null && entityObjects.Length >= 2)
             {
-                Debug.LogWarning($"[AnankeController] Sidecar request failed: {request.error}. " +
-                                 "Is the sidecar running? Run: cd sidecar && npm start");
-                yield break;
+                RegisterEntities(entityObjects);
+                return;
             }
 
-            ParseAndStoreSnapshots(request.downloadHandler.text);
+            entityObjects = new[]
+            {
+                CreatePlaceholderRig(1, new Vector3(-1.5f, 0f, 0f), Color.cyan),
+                CreatePlaceholderRig(2, new Vector3(1.5f, 0f, 0f), Color.red),
+            };
+
+            RegisterEntities(entityObjects);
         }
 
-        // ── JSON parsing ──────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Parse the JSON array from the sidecar.
-        ///
-        /// JsonUtility does not support root JSON arrays, so we wrap the
-        /// response in a helper object before deserialising.
-        /// </summary>
-        private void ParseAndStoreSnapshots(string json)
+        private void RegisterEntities(GameObject[] objects)
         {
-            // Wrap the root array so JsonUtility can parse it.
-            string wrapped = $"{{\"snapshots\":{json}}}";
+            _entityMap.Clear();
+            _boneMaps.Clear();
+            _spawnPositions.Clear();
 
-            try
+            for (int index = 0; index < objects.Length; index++)
             {
-                var list = JsonUtility.FromJson<AnankeSnapshotList>(wrapped);
-                _latestSnapshots = list?.snapshots ?? Array.Empty<AnankeEntitySnapshot>();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AnankeController] JSON parse error: {ex.Message}");
-                _latestSnapshots = Array.Empty<AnankeEntitySnapshot>();
+                var go = objects[index];
+                if (go == null)
+                    continue;
+
+                var entityId = index + 1;
+                _entityMap[entityId] = go;
+                _boneMaps[entityId] = SkeletonMapper.IndexBones(go.transform);
+                _spawnPositions[entityId] = go.transform.position;
             }
         }
-
-        // ── Snapshot application ──────────────────────────────────────────────
 
         private void ApplySnapshots(AnankeEntitySnapshot[] snapshots)
         {
-            if (snapshots == null) return;
+            if (snapshots == null)
+                return;
 
-            foreach (var snap in snapshots)
+            foreach (var snapshot in snapshots)
             {
-                if (!_entityMap.TryGetValue(snap.entityId, out var go) || go == null)
+                if (!_entityMap.TryGetValue(snapshot.entityId, out var entityRoot))
                     continue;
 
-                ApplySnapshot(go, snap);
+                ApplyRootTransform(entityRoot, snapshot);
+                ApplyPose(entityRoot, snapshot);
             }
         }
 
-        private void ApplySnapshot(GameObject go, AnankeEntitySnapshot snap)
+        private void ApplyRootTransform(GameObject entityRoot, AnankeEntitySnapshot snapshot)
         {
-            // ── Position ──────────────────────────────────────────────────────
-            // Ananke: right-hand Y-up, Z = depth.
-            // Unity:  left-hand Y-up. Map Ananke (x, y, z) → Unity (x, z, y).
-            // Adjust if your scene uses a different orientation.
-            if (snap.position != null)
+            if (snapshot.position == null)
+                return;
+
+            var baseOffset = _spawnPositions.TryGetValue(snapshot.entityId, out var storedOffset)
+                ? storedOffset
+                : Vector3.zero;
+            entityRoot.transform.position = baseOffset + snapshot.position.ToUnityVector();
+
+            if (snapshot.animation == null)
+                return;
+
+            var tint = entityRoot.GetComponentInChildren<Renderer>();
+            if (tint != null)
             {
-                go.transform.position = new Vector3(
-                    snap.position.x,
-                    snap.position.z,   // Ananke vertical Z → Unity Y
-                    snap.position.y
-                );
+                var shock = AnankeAnimationHints.QToFloat(snapshot.animation.shockQ);
+                var colour = Color.Lerp(Color.white, Color.yellow, shock);
+                if (snapshot.animation.dead)
+                    colour = Color.gray;
+                else if (snapshot.animation.unconscious)
+                    colour = new Color(0.6f, 0.6f, 1f);
+
+                tint.material.color = colour;
             }
-
-            // ── Animator integration ──────────────────────────────────────────
-            // TODO (M2): Uncomment and complete when an AnimatorController asset
-            // has been created with matching parameter names.
-            //
-            // var animator = go.GetComponent<Animator>();
-            // if (animator != null && snap.animation != null)
-            // {
-            //     var anim = snap.animation;
-            //
-            //     // Dead / KO override layers.
-            //     animator.SetBool("IsDead",        anim.dead);
-            //     animator.SetBool("IsUnconscious",  anim.unconscious);
-            //     animator.SetBool("IsProne",        anim.prone);
-            //
-            //     // Locomotion: drive a Speed float from the active blend.
-            //     float speed = 0f;
-            //     if      (anim.sprint > 0) speed = 1.5f;
-            //     else if (anim.run    > 0) speed = 1.0f;
-            //     else if (anim.walk   > 0) speed = 0.5f;
-            //     animator.SetFloat("Speed", speed);
-            //
-            //     // Combat blend weights.
-            //     animator.SetFloat("GuardWeight",  AnankeAnimationHints.QToFloat(anim.guardingQ));
-            //     animator.SetBool("IsAttacking",   anim.attackingQ > 0);
-            //
-            //     // Condition overlays.
-            //     animator.SetFloat("ShockWeight", AnankeAnimationHints.QToFloat(anim.shockQ));
-            // }
-
-            // ── Pose modifiers ────────────────────────────────────────────────
-            // TODO (M3): Map pose[].segmentId to HumanBodyBones and drive blend shapes.
-            //
-            // if (snap.pose != null)
-            // {
-            //     var smr = go.GetComponentInChildren<SkinnedMeshRenderer>();
-            //     foreach (var modifier in snap.pose)
-            //     {
-            //         int blendIndex = SegmentToBlendShapeIndex(modifier.segmentId);
-            //         if (blendIndex >= 0 && smr != null)
-            //         {
-            //             smr.SetBlendShapeWeight(blendIndex,
-            //                 modifier.ImpairmentFloat() * 100f); // Unity: 0–100
-            //         }
-            //     }
-            // }
-
-            // ── Grapple IK constraints ────────────────────────────────────────
-            // TODO (M4): Activate Animation Rigging IK constraint when held.
-            //
-            // if (snap.grapple != null && snap.grapple.isHeld)
-            // {
-            //     // Find holder GameObject and lock IK target to its attach point.
-            //     // Use snap.grapple.position to select the target anchor:
-            //     //   "standing" → upright attachment
-            //     //   "prone"    → ground-level attachment
-            //     //   "pinned"   → ground-pin attachment
-            //     float grip = snap.grapple.GripFloat();
-            //     // Drive hand-close blend shape on holder with grip weight.
-            // }
         }
 
-        // ── Segment → blend shape mapping ─────────────────────────────────────
-
-        /// <summary>
-        /// Map an Ananke segment ID to a SkinnedMeshRenderer blend shape index.
-        /// TODO (M3): Replace with a ScriptableObject mapping asset loaded at runtime.
-        /// </summary>
-        private int SegmentToBlendShapeIndex(string segmentId)
+        private void ApplyPose(GameObject entityRoot, AnankeEntitySnapshot snapshot)
         {
-            return segmentId switch
+            if (snapshot.pose == null)
+                return;
+
+            if (!_boneMaps.TryGetValue(snapshot.entityId, out var boneMap))
+                boneMap = SkeletonMapper.IndexBones(entityRoot.transform);
+
+            foreach (var modifier in snapshot.pose)
             {
-                "thorax"   => 0,
-                "abdomen"  => 1,
-                "pelvis"   => 2,
-                "head"     => 3,
-                "leftArm"  => 4,
-                "rightArm" => 5,
-                "leftLeg"  => 6,
-                "rightLeg" => 7,
-                _          => -1,
-            };
+                if (!boneMap.TryGetValue(modifier.segmentId, out var bone) || bone == null)
+                    continue;
+
+                var impairment = modifier.ImpairmentFloat();
+                bone.localScale = Vector3.one * (1f + impairment * 0.12f);
+                bone.localRotation = Quaternion.Euler(impairment * 8f, 0f, 0f);
+            }
+        }
+
+        private static GameObject CreatePlaceholderRig(int entityId, Vector3 position, Color colour)
+        {
+            var root = new GameObject($"Entity{entityId}");
+            root.transform.position = position;
+
+            CreateBone(root.transform, "Pelvis", Vector3.zero, new Vector3(0.35f, 0.25f, 0.2f), colour);
+            CreateBone(root.transform, "Torso", new Vector3(0f, 0.55f, 0f), new Vector3(0.4f, 0.55f, 0.22f), colour);
+            CreateBone(root.transform, "Head", new Vector3(0f, 1.15f, 0f), new Vector3(0.25f, 0.25f, 0.25f), colour);
+            CreateBone(root.transform, "LeftArm", new Vector3(-0.4f, 0.65f, 0f), new Vector3(0.18f, 0.45f, 0.18f), colour);
+            CreateBone(root.transform, "RightArm", new Vector3(0.4f, 0.65f, 0f), new Vector3(0.18f, 0.45f, 0.18f), colour);
+            CreateBone(root.transform, "LeftLeg", new Vector3(-0.15f, -0.55f, 0f), new Vector3(0.2f, 0.55f, 0.2f), colour);
+            CreateBone(root.transform, "RightLeg", new Vector3(0.15f, -0.55f, 0f), new Vector3(0.2f, 0.55f, 0.2f), colour);
+
+            return root;
+        }
+
+        private static GameObject CreateBone(Transform parent, string name, Vector3 localPosition, Vector3 scale, Color colour)
+        {
+            var primitive = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            primitive.name = name;
+            primitive.transform.SetParent(parent, false);
+            primitive.transform.localPosition = localPosition;
+            primitive.transform.localScale = scale;
+            var renderer = primitive.GetComponent<Renderer>();
+            if (renderer != null)
+                renderer.material.color = colour;
+            return primitive;
         }
     }
 }

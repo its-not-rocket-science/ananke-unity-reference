@@ -1,0 +1,10 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+config/name="Ananke Godot Reference"
+run/main_scene="res://scenes/AnankeDemo.tscn"
+config/features=PackedStringArray("4.0")
+
+[rendering]
+renderer/rendering_method="forward_plus"

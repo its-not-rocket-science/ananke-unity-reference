@@ -59,44 +59,40 @@ The sidecar imports from `../ananke/dist/src/...` until Ananke is published to n
 
 ## Architecture
 
-The integration uses a **TypeScript sidecar ↔ Unity** channel. The sidecar owns the simulation; Unity owns the renderer. Unity does not have a built-in WebSocket server, so the sidecar runs an HTTP server and Unity polls it via `UnityWebRequest`, or the sidecar and Unity communicate over a named pipe.
+The integration now uses a **TypeScript sidecar ↔ engine WebSocket** channel. The sidecar owns the simulation and publishes the latest rig frame over `ws://127.0.0.1:3001/stream`, while Unity and Godot each consume the same frame envelope with engine-specific receiver scripts.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  TypeScript sidecar (Node.js, 20 Hz)                     │
 │                                                          │
 │  stepWorld() ──► extractRigSnapshots()                   │
-│               ──► deriveAnimationHints()                 │
-│               ──► derivePoseModifiers()                  │
-│               ──► deriveGrappleConstraint()              │
-│               ──► serializeReplay() [optional]           │
-│                                 │                        │
-│              HTTP POST /frame   │   OR named pipe        │
-│              http://127.0.0.1:7374                       │
-└─────────────────────────────────┼────────────────────────┘
+│               ──► serialise snapshot_frame envelope      │
+│               ──► GET /health + GET /state               │
+│               ──► WS /stream push                        │
+└─────────────────────────────────┬────────────────────────┘
                                   │
-┌─────────────────────────────────▼────────────────────────┐
-│  Unity 6 (C#, FixedUpdate 50 Hz / Update display Hz)     │
-│                                                          │
-│  AnankeReceiver.cs     HTTP/pipe client + JSON parse     │
-│  AnankeInterpolator.cs Snapshot buffer + lerp            │
-│  SkeletonMapper.cs     Segment ID → HumanBodyBones       │
-│  AnimationDriver.cs    AnimationHints → Animator params  │
-│  GrappleApplicator.cs  GrappleConstraint → constraints   │
-└──────────────────────────────────────────────────────────┘
+                  ┌───────────────┴───────────────┐
+                  │                               │
+┌─────────────────▼────────────────┐ ┌────────────▼─────────────┐
+│ Unity 6                           │ │ Godot 4                  │
+│ AnankeReceiver.cs                 │ │ ananke_websocket_client  │
+│ AnankeController.cs               │ │ ananke_demo_scene.gd     │
+│ SkeletonMapper.cs                 │ │ ananke_skeleton_mapper   │
+└──────────────────────────────────┘ └──────────────────────────┘
 ```
 
-### Why HTTP and not WebSocket?
+### Why WebSocket?
 
-Unity 6 supports `ClientWebSocket` in C# but requires careful threading to avoid blocking the main thread. HTTP polling with `UnityWebRequest` is simpler to set up for a reference implementation. The sidecar queues the latest frame; Unity fetches it at `FixedUpdate` rate. The latency is one HTTP round-trip (~0.5 ms on loopback), negligible for visual fidelity.
-
-If you need lower latency or bidirectional commands (e.g., for player input), replace the HTTP channel with a named pipe or a dedicated WebSocket pair.
+Both reference engines now use a shared push stream. The TypeScript sidecar still exposes `GET /health` and `GET /state` for inspection, but the primary transport is WebSocket so Unity and Godot can react to each simulation tick without polling overhead.
 
 ---
 
 ## What gets built
 
 ### Skeleton bone mapping
+
+Both engines ship a placeholder segment mapper keyed by the canonical Ananke segment IDs (`head`, `torso`, `leftArm`, `rightArm`, `leftLeg`, `rightLeg`, `pelvis`, `neck`). Unity resolves those IDs to placeholder child transforms and Godot resolves them to `Node3D` names in the demo scene.
+
 
 `SkeletonMapper.cs` maps Ananke's segment IDs to Unity's `HumanBodyBones` enum:
 
@@ -152,27 +148,22 @@ Do not give the Rigidbody `isKinematic = false` — Ananke owns all simulation p
 ## Quick start
 
 ```bash
-# 1. Clone Ananke
-git clone https://github.com/its-not-rocket-science/ananke.git
-cd ananke && npm install && npm run build && cd ..
+# 1. Install sidecar dependencies
+cd sidecar && npm install
 
-# 2. Clone this repo
-git clone https://github.com/its-not-rocket-science/ananke-unity-reference.git
-cd ananke-unity-reference
+# 2. Start the TypeScript sidecar
+npm start
+# Prints the HTTP health endpoint and the WebSocket stream URL
 
-# 3. Install sidecar dependencies
-cd sidecar && npm install && cd ..
+# 3. Verify the bridge contract locally
+npm run test:bridge
 
-# 4. Start the sidecar
-npm run sidecar
-# Prints: "Ananke sidecar ready at http://127.0.0.1:7374"
-
-# 5. Open the Unity project
-# Unity Hub → Open → select unity/ folder
-# Open Scenes/Demo.unity → Press Play
+# 4. Open Unity or Godot
+# Unity: add AnankeReceiver + AnankeController to an empty GameObject.
+# Godot: open godot/project.godot and run the default scene.
 ```
 
-The demo scene opens a viewport with two characters. The sidecar runs the Knight vs Brawler scenario and serves frames to Unity.
+Both demo integrations create two placeholder rigs and consume the same `snapshot_frame` envelope from the sidecar.
 
 ---
 
@@ -182,36 +173,28 @@ The demo scene opens a viewport with two characters. The sidecar runs the Knight
 ananke-unity-reference/
 ├── sidecar/                        TypeScript sidecar (Node.js)
 │   ├── src/
-│   │   ├── main.ts                 Entry: sim loop + HTTP server
-│   │   ├── scenario.ts             Knight vs Brawler setup
-│   │   ├── serialiser.ts           Frame → JSON for Unity
-│   │   └── replay.ts               Optional replay recording
+│   │   ├── main.ts                 Simulation loop + HTTP/WebSocket transport
+│   │   └── protocol.ts             Shared wire-frame shape
+│   ├── scripts/
+│   │   └── verify-bridge.mjs       Local stream verification
 │   ├── package.json
 │   └── tsconfig.json
 │
-├── unity/                          Unity 6 project
-│   ├── Assets/
-│   │   ├── AnankePlugin/
-│   │   │   ├── Runtime/
-│   │   │   │   ├── AnankeReceiver.cs        HTTP client + JSON parse
-│   │   │   │   ├── AnankeInterpolator.cs    Snapshot buffer + lerp
-│   │   │   │   ├── SkeletonMapper.cs        Segment → HumanBodyBones
-│   │   │   │   ├── AnimationDriver.cs       Hints → Animator params
-│   │   │   │   ├── GrappleApplicator.cs     Constraint → joint locks
-│   │   │   │   └── AnankeSkeletonConfig.cs  ScriptableObject override
-│   │   │   └── Editor/
-│   │   │       └── AnankePluginEditor.cs    Inspector helpers
-│   │   ├── Scenes/
-│   │   │   └── Demo.unity                   Knight vs Brawler arena
-│   │   ├── Prefabs/
-│   │   │   └── AnankeCharacter.prefab       Rig + driver components
-│   │   └── Models/
-│   │       └── placeholder_humanoid.fbx     CC0 placeholder mesh
-│   └── Packages/
-│       └── manifest.json
+├── Assets/Ananke/Scripts/          Unity 6 runtime scripts
+│   ├── AnankeReceiver.cs           ClientWebSocket receiver
+│   ├── AnankeController.cs         Placeholder rig driver
+│   ├── AnankeSnapshot.cs           Shared frame DTOs
+│   └── SkeletonMapper.cs           Segment → placeholder bone map
 │
-├── docs/
-│   └── bone-mapping-guide.md
+├── godot/                          Godot 4 reference client
+│   ├── project.godot
+│   ├── scenes/
+│   │   └── AnankeDemo.tscn         Placeholder duel scene
+│   └── scripts/
+│       ├── ananke_demo_scene.gd
+│       ├── ananke_skeleton_mapper.gd
+│       └── ananke_websocket_client.gd
+│
 └── README.md
 ```
 

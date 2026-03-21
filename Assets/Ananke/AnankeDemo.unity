@@ -1,17 +1,31 @@
-// This file is a placeholder. Unity scene files (.unity) are binary YAML
-// and must be created from within the Unity Editor.
-//
-// To create the AnankeDemo scene:
-//
-//   1. Open this project in Unity 6.
-//   2. Create a new scene: File > New Scene > Basic (Built-in).
-//   3. Add an empty GameObject named "AnankeController".
-//   4. Add the Ananke/AnankeController component to it.
-//   5. Create two capsule GameObjects: "Entity1" (position 0,0,0) and
-//      "Entity2" (position 0.6,0,0) to represent the two combatants.
-//   6. Assign Entity1 and Entity2 to the "Entity Objects" array in the
-//      AnankeController Inspector.
-//   7. Save the scene as Assets/Ananke/AnankeDemo.unity.
-//
-// The sidecar must be running before you press Play:
-//   cd sidecar && npm start
+# Ananke demo scene recipe
+#
+# This repository cannot author Unity scene YAML safely without Unity-generated
+# .meta GUIDs, so the demo scene is expressed as a deterministic setup recipe
+# for the scripts now committed in Assets/Ananke/Scripts.
+#
+# Scene contents
+#  - Empty GameObject: "AnankeRuntime"
+#  - Components on that GameObject:
+#      * Ananke.AnankeReceiver
+#      * Ananke.AnankeController
+#  - No entity assignments required: AnankeController auto-creates two
+#    placeholder rigs with mapped bones named Head, Torso, LeftArm, RightArm,
+#    LeftLeg, RightLeg, and Pelvis.
+#  - Optional floor: Unity Plane at (0, 0, 0)
+#  - Optional Camera: position (0, 3, -8), rotation (18, 0, 0)
+#  - Optional Directional Light: rotation (50, -30, 0)
+#
+# Runtime behaviour
+#  - The receiver opens ws://127.0.0.1:3001/stream.
+#  - The controller consumes snapshot frames and applies root translation plus
+#    simple pose scaling/tilt to the placeholder rig bones.
+#  - Body tint moves toward yellow as shockQ rises and turns grey on death.
+#
+# Editor steps
+#  1. Open the Unity project.
+#  2. Create a new empty scene.
+#  3. Add the runtime GameObject and the two scripts above.
+#  4. Save as Assets/Ananke/AnankeDemo.unity.
+#  5. Start the sidecar with: cd sidecar && npm start
+#  6. Press Play.
