@@ -172,7 +172,7 @@ npm run sidecar
 # Open Scenes/Demo.unity → Press Play
 ```
 
-The demo scene opens a viewport with two characters. The sidecar runs the Knight vs Brawler scenario and serves frames to Unity.
+The demo scene opens a viewport with two characters. The sidecar runs the Knight vs Brawler scenario and serves `GET /frame` envelopes for Unity plus a legacy `GET /state` array for simple polling clients.
 
 ---
 
@@ -184,8 +184,7 @@ ananke-unity-reference/
 │   ├── src/
 │   │   ├── main.ts                 Entry: sim loop + HTTP server
 │   │   ├── scenario.ts             Knight vs Brawler setup
-│   │   ├── serialiser.ts           Frame → JSON for Unity
-│   │   └── replay.ts               Optional replay recording
+│   │   └── serialiser.ts           Frame → JSON for Unity
 │   ├── package.json
 │   └── tsconfig.json
 │
