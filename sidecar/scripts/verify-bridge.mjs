@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 
-const sidecar = spawn('node', ['dist/main.js'], {
+const sidecar = spawn('node', ['server.js'], {
   cwd: process.cwd(),
   stdio: ['ignore', 'pipe', 'pipe'],
 });
