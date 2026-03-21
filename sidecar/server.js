@@ -1,1 +1,3 @@
-import './dist/main.js';
+#!/usr/bin/env node
+
+import "./dist/main.js";

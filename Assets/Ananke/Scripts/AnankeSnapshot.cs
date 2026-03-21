@@ -5,7 +5,7 @@ namespace Ananke
 {
     public static class AnankeScale
     {
-        public const float Q = 18000f;
+        public const float Q = 10000f;
     }
 
     [Serializable]
@@ -15,6 +15,7 @@ namespace Ananke
         public float y;
         public float z;
 
+        public Vector3 ToUnityVector() => new Vector3(x, z, y);
         public Vector3 ToUnityPosition() => new Vector3(x, z, y);
         public static AnankePosition Lerp(AnankePosition a, AnankePosition b, float t)
         {
@@ -144,7 +145,7 @@ namespace Ananke
     }
 
     [Serializable]
-    public class AnankeGrapple
+    public class AnankeGrappleConstraint
     {
         public bool isHolder;
         public int holdingEntityId;
@@ -170,6 +171,9 @@ namespace Ananke
         public int teamId;
         public int tick;
         public AnankePosition position;
+        public AnankeAnimationHints animation;
+        public AnankePoseModifier[] pose;
+        public AnankeGrappleConstraint grapple;
         public AnankePosition velocity;
         public AnankeAnimationHints animation;
         public AnankePoseModifier[] pose;
@@ -190,8 +194,12 @@ namespace Ananke
     }
 
     [Serializable]
-    public class AnankeSnapshotList
+    public class AnankeFrameEnvelope
     {
+        public string type;
+        public int tick;
+        public int entityCount;
+        public string generatedAtIso;
         public AnankeEntitySnapshot[] snapshots;
     }
 }
