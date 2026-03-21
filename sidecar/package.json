@@ -4,15 +4,17 @@
   "type": "module",
   "description": "Ananke physics sidecar for Unity 6",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "check": "node --check server.js"
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/main.js",
+    "dev": "npm run build && node dist/main.js",
+    "smoke": "npm run build && node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@its-not-rocket-science/ananke": "^0.1.4"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.4"
   }
 }
