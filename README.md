@@ -164,6 +164,7 @@ npm run test:bridge
 ```
 
 Both demo integrations create two placeholder rigs and consume the same `snapshot_frame` envelope from the sidecar.
+The demo scene opens a viewport with two characters. The sidecar runs the Knight vs Brawler scenario and serves `GET /frame` envelopes for Unity plus a legacy `GET /state` array for simple polling clients.
 
 ---
 
@@ -177,6 +178,9 @@ ananke-unity-reference/
 │   │   └── protocol.ts             Shared wire-frame shape
 │   ├── scripts/
 │   │   └── verify-bridge.mjs       Local stream verification
+│   │   ├── main.ts                 Entry: sim loop + HTTP server
+│   │   ├── scenario.ts             Knight vs Brawler setup
+│   │   └── serialiser.ts           Frame → JSON for Unity
 │   ├── package.json
 │   └── tsconfig.json
 │

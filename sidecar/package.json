@@ -5,10 +5,11 @@
   "description": "Ananke physics sidecar for Unity 6 and Godot 4",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "npm run build && node server.js",
-    "dev": "tsc -w -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test:bridge": "npm run build && node scripts/verify-bridge.mjs"
+    "start": "node dist/main.js",
+    "dev": "npm run build && node dist/main.js",
+    "smoke": "npm run build && node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@its-not-rocket-science/ananke": "^0.1.4"

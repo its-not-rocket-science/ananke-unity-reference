@@ -6,52 +6,79 @@ namespace Ananke
 {
     public static class SkeletonMapper
     {
-        private static readonly Dictionary<string, string> BoneNames = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, HumanBodyBones> DefaultMappings = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["head"] = "Head",
-            ["neck"] = "Neck",
-            ["torso"] = "Torso",
-            ["thorax"] = "Torso",
-            ["abdomen"] = "Torso",
-            ["pelvis"] = "Pelvis",
-            ["leftArm"] = "LeftArm",
-            ["rightArm"] = "RightArm",
-            ["leftLeg"] = "LeftLeg",
-            ["rightLeg"] = "RightLeg",
+            ["head"] = HumanBodyBones.Head,
+            ["neck"] = HumanBodyBones.Neck,
+            ["torso"] = HumanBodyBones.Spine,
+            ["thorax"] = HumanBodyBones.Chest,
+            ["abdomen"] = HumanBodyBones.Spine,
+            ["pelvis"] = HumanBodyBones.Hips,
+            ["leftArm"] = HumanBodyBones.LeftUpperArm,
+            ["rightArm"] = HumanBodyBones.RightUpperArm,
+            ["leftLeg"] = HumanBodyBones.LeftUpperLeg,
+            ["rightLeg"] = HumanBodyBones.RightUpperLeg,
         };
 
-        public static string ResolveBoneName(string segmentId)
+        public static HumanBodyBones Resolve(string segmentId, AnankeSkeletonConfig config = null)
         {
-            return BoneNames.TryGetValue(segmentId, out var boneName) ? boneName : "Torso";
-        }
-
-        public static Dictionary<string, Transform> IndexBones(Transform root)
-        {
-            var map = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
-            foreach (var pair in BoneNames)
+            if (config != null && config.TryResolveBone(segmentId, out var overrideBone))
             {
-                var bone = FindDeepChild(root, pair.Value);
-                if (bone != null)
-                    map[pair.Key] = bone;
+                return overrideBone;
             }
 
-            return map;
+            return !string.IsNullOrEmpty(segmentId) && DefaultMappings.TryGetValue(segmentId, out var bone)
+                ? bone
+                : HumanBodyBones.LastBone;
         }
 
-        private static Transform FindDeepChild(Transform parent, string childName)
+        public static int ResolveBlendShapeIndex(string segmentId, AnankeSkeletonConfig config = null)
         {
-            if (parent.name.Equals(childName, StringComparison.OrdinalIgnoreCase))
-                return parent;
+            return config != null && config.TryResolveBlendShape(segmentId, out var index) ? index : -1;
+        }
+    }
 
-            for (int index = 0; index < parent.childCount; index++)
+    [CreateAssetMenu(menuName = "Ananke/Skeleton Config", fileName = "AnankeSkeletonConfig")]
+    public class AnankeSkeletonConfig : ScriptableObject
+    {
+        [Serializable]
+        public class SegmentBinding
+        {
+            public string segmentId;
+            public HumanBodyBones humanBodyBone = HumanBodyBones.LastBone;
+            public int blendShapeIndex = -1;
+        }
+
+        [SerializeField] private SegmentBinding[] bindings = Array.Empty<SegmentBinding>();
+
+        public bool TryResolveBone(string segmentId, out HumanBodyBones bone)
+        {
+            foreach (var binding in bindings)
             {
-                var child = parent.GetChild(index);
-                var match = FindDeepChild(child, childName);
-                if (match != null)
-                    return match;
+                if (binding != null && string.Equals(binding.segmentId, segmentId, StringComparison.OrdinalIgnoreCase))
+                {
+                    bone = binding.humanBodyBone;
+                    return bone != HumanBodyBones.LastBone;
+                }
             }
 
-            return null;
+            bone = HumanBodyBones.LastBone;
+            return false;
+        }
+
+        public bool TryResolveBlendShape(string segmentId, out int blendShapeIndex)
+        {
+            foreach (var binding in bindings)
+            {
+                if (binding != null && string.Equals(binding.segmentId, segmentId, StringComparison.OrdinalIgnoreCase))
+                {
+                    blendShapeIndex = binding.blendShapeIndex;
+                    return blendShapeIndex >= 0;
+                }
+            }
+
+            blendShapeIndex = -1;
+            return false;
         }
     }
 }
