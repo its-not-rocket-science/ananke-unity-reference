@@ -3,6 +3,10 @@ using UnityEngine;
 
 namespace Ananke
 {
+    /// <summary>
+    /// Ananke fixed-point scale constants.
+    /// SCALE.Q = 10_000 in src/units.ts — all integer Q values from the sidecar are in [0, 10000].
+    /// </summary>
     public static class AnankeScale
     {
         public const float Q = 10000f;

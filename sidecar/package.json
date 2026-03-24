@@ -12,7 +12,7 @@
     "smoke": "npm run build && node scripts/smoke-test.mjs"
   },
   "dependencies": {
-    "@its-not-rocket-science/ananke": "^0.1.4"
+    "@its-not-rocket-science/ananke": "^0.1.14"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

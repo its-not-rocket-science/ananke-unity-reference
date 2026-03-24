@@ -1,20 +1,25 @@
 # ananke-unity-reference — Roadmap
 
-## M1 — Entity positions via HTTP polling (current)
+## M1 — Entity positions via HTTP polling ✅ COMPLETE
 
-**Status:** In progress
+**Status:** Complete
 
-- Sidecar runs `stepWorld` at 20 Hz and serves entity positions via `GET /state`.
-- `AnankeController.cs` uses `UnityWebRequest` with `InvokeRepeating` at 20 Hz.
-- Parses `AnankeSnapshot[]` JSON and moves two placeholder `GameObject` capsules.
-- No Animator integration, no bone mapping.
+- Sidecar (`sidecar/src/main.ts`) runs `stepWorld` at 20 Hz and serves `GET /frame` envelopes.
+- `AnankeReceiver.cs` polls via `UnityWebRequest` at 20 Hz and fires `FrameReceived` events.
+- `AnankeInterpolator.cs` double-buffers frames and computes blend factor `_t` at display rate.
+- `AnankeController.cs` drives placeholder capsule `GameObject` positions from interpolated state.
+- `AnankeSnapshot.cs` defines `AnankeScale.Q = 10000f` (fixed — was erroneously 18000 in earlier
+  revisions).
 
-Acceptance criteria:
+Acceptance criteria — all met:
 - Two capsules move in the Unity viewport driven by Ananke simulation positions.
 - `GET /health` returns `{ "ok": true }`.
 - Sidecar exits cleanly on SIGTERM.
+- `AnankeCondition`, `AnankeAnimationHints`, `AnankePoseModifier` types correctly normalise
+  Q values to `[0,1]` by dividing by `AnankeScale.Q = 10000f`.
 
-Stretch goal: Upgrade HTTP polling to WebSocket push using Unity's `NativeWebSocket` or `com.unity.netcode.gameobjects` transport for lower latency.
+Stretch goal: Upgrade HTTP polling to WebSocket push using Unity's `NativeWebSocket` or
+`com.unity.netcode.gameobjects` transport for lower latency.
 
 ---
 
