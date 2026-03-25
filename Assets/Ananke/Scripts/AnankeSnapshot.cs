@@ -160,10 +160,10 @@ namespace Ananke
 
         public float GripFloat() => gripQ / AnankeScale.Q;
 
-        public static AnankeGrapple Blend(AnankeGrapple a, AnankeGrapple b, float t)
+        public static AnankeGrappleConstraint Blend(AnankeGrappleConstraint a, AnankeGrappleConstraint b, float t)
         {
-            a ??= new AnankeGrapple();
-            b ??= new AnankeGrapple();
+            a ??= new AnankeGrappleConstraint();
+            b ??= new AnankeGrappleConstraint();
             return t >= 0.5f ? b : a;
         }
     }
@@ -175,26 +175,13 @@ namespace Ananke
         public int teamId;
         public int tick;
         public AnankePosition position;
-        public AnankeAnimationHints animation;
-        public AnankePoseModifier[] pose;
-        public AnankeGrappleConstraint grapple;
         public AnankePosition velocity;
         public AnankeAnimationHints animation;
         public AnankePoseModifier[] pose;
-        public AnankeGrapple grapple;
+        public AnankeGrappleConstraint grapple;
         public AnankeCondition condition;
         public bool dead;
         public bool unconscious;
-    }
-
-    [Serializable]
-    public class AnankeFrameEnvelope
-    {
-        public string scenarioId;
-        public int tickHz;
-        public int worldTick;
-        public string generatedAt;
-        public AnankeEntitySnapshot[] frames;
     }
 
     [Serializable]
