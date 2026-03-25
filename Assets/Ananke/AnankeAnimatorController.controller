@@ -40,6 +40,13 @@ AnimatorController:
     m_DefaultInt: 0
     m_DefaultBool: 0
     m_Controller: {fileID: 9100000}
+  # GripWeight: driven by GrappleApplicator when isHolder — wire to hand-close clip
+  - m_Name: GripWeight
+    m_Type: 1
+    m_DefaultFloat: 0
+    m_DefaultInt: 0
+    m_DefaultBool: 0
+    m_Controller: {fileID: 9100000}
   # ── Condition overlays (float 0–1) ──────────────────────────────────────
   # Drive additive/override layers for stagger, fear, injury deformation
   - m_Name: ShockBlend

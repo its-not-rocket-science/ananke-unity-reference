@@ -46,12 +46,16 @@ Stretch goal: Upgrade HTTP polling to WebSocket push using Unity's `NativeWebSoc
 
 ---
 
-## M4 — GrapplePoseConstraint via Unity IK
+## M4 — GrapplePoseConstraint via Unity IK ✅ COMPLETE
 
-- When `grapple.isHeld = true`, activate a `RigConstraint` (Animation Rigging package) locking the held entity's root to an attachment point on the holder.
-- `position` field (`"standing"`, `"prone"`, `"pinned"`) selects the constraint target.
-- `gripQ` (0–10000) drives a hand-close blend shape on the holder `SkinnedMeshRenderer`.
-- Constraint released when `grapple.isHeld` becomes false.
+**Status:** Complete
+
+- `GrappleApplicator.cs` handles both grapple roles independently:
+  - **isHeld**: converges this entity's root transform toward the holder's anchor (`standingAnchor`, `proneAnchor`, or `pinnedAnchor`; falls back to the holder's root) at a fixed 0.2 lerp rate per frame.
+  - **isHolder**: drives `GripWeight` float on the entity's `Animator` component (0–1 from `gripQ / SCALE.Q`). Wire a hand-close blend tree or override clip to `GripWeight` in `AnankeAnimatorController.controller`.
+- `AnankeAnimatorController.controller` now declares `GripWeight` (Float) alongside the other Combat-layer parameters.
+- When Animation Rigging package is available, replace the `transform.position` lerp with a `TwoBoneIKConstraint` targeting the holder's anchor. The `GripWeight` parameter path remains the same.
+- Constraint released (position no longer overridden; `GripWeight` → 0) when `grapple.isHeld` / `grapple.isHolder` both become false.
 
 ---
 
