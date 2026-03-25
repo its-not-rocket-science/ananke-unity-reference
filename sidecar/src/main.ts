@@ -5,6 +5,7 @@ import {
   STREAM_PATH,
 } from "./protocol.js";
 import { createScenario } from "./scenario.js";
+import { loadWasmKernel, type WasmKernel } from "@its-not-rocket-science/ananke/wasm-kernel";
 import {
   acceptWebSocket,
   decodeClientFrame,
@@ -21,6 +22,12 @@ const scenario = createScenario();
 const clients = new Set<ClientSocket>();
 let intervalId: NodeJS.Timeout | null = null;
 let shuttingDown = false;
+let wasmKernel: WasmKernel | null = null;
+
+const WASM_LOG_EVERY = 100;
+loadWasmKernel().then(k => { wasmKernel = k; }).catch(err => {
+  process.stderr.write(`[wasm] kernel unavailable: ${err.message}\n`);
+});
 
 function publishFrame(): void {
   const payload = JSON.stringify(scenario.getLatestFrame());
@@ -39,8 +46,14 @@ function publishFrame(): void {
   }
 }
 
+let tickCount = 0;
 function tick(): void {
   scenario.tick();
+  if (wasmKernel && tickCount % WASM_LOG_EVERY === 0) {
+    const report = wasmKernel.shadowStep(scenario.world, scenario.world.tick);
+    process.stderr.write(report.summary + "\n");
+  }
+  tickCount += 1;
   publishFrame();
 }
 
