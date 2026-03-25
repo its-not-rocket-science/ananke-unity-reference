@@ -23,24 +23,26 @@ Stretch goal: Upgrade HTTP polling to WebSocket push using Unity's `NativeWebSoc
 
 ---
 
-## M2 — Animator Controller: AnimationHints → Animator parameters
+## M2 — Animator Controller: AnimationHints → Animator parameters ✅ COMPLETE
 
-- Create an `AnimatorController` asset with parameters matching the `AnimationHints` table in README.md.
-- `AnankeController.cs` calls `Animator.SetBool` / `Animator.SetFloat` from each snapshot.
-- Blend tree for locomotion: `Speed` float drives Idle/Walk/Run/Sprint transitions.
-- Override layer for combat: `GuardWeight` and `IsAttacking` bool drive guard/attack clips.
-- Overlay layer for condition: `ShockWeight` drives a stagger/flinch additive animation.
+**Status:** Complete
+
+- `AnimationDriver.cs` drives all Animator parameters from `AnankeAnimationHints` and `AnankeCondition`.
+- `Assets/Ananke/AnankeAnimatorController.controller` provides the Unity Animator asset with all parameters pre-declared and three layers wired: Base Layer (PrimaryState int), Combat Override, ShockOverlay Additive.
+- Parameters declared: `PrimaryState` (Int 0–5), `Speed` (Float), `GuardWeight`, `AttackWeight`, `ShockBlend`, `FearBlend`, `InjuryBlend` (all Float), `IsProne`, `IsUnconscious`, `IsDead` (Bool).
+- Base-layer AnyState transitions on `PrimaryState == 0–5` → Idle / Guard / Attack / Prone / KO / Dead.
+- Assign real animation clips and wire blend trees in the inspector. `AnimationDriver.cs` does not change.
 
 ---
 
-## M3 — HumanoidRig: segment IDs → Unity HumanBodyBones
+## M3 — HumanoidRig: segment IDs → Unity HumanBodyBones ✅ COMPLETE
 
-- Map `RigSnapshot.pose[].segmentId` values to `HumanBodyBones` enum entries using a `ScriptableObject` mapping asset.
-- Drive `Animator.SetBoneLocalRotation` (or `HumanPoseHandler`) from segment deformation data.
-- `AnankeSnapshot.pose[]` `impairmentQ` drives blend shape weights on a `SkinnedMeshRenderer` for injury deformation.
+**Status:** Complete
 
-Reference segment IDs from `HUMANOID_PLAN` in `@its-not-rocket-science/ananke`:
-`thorax`, `abdomen`, `pelvis`, `head`, `neck`, `leftArm`, `rightArm`, `leftLeg`, `rightLeg`.
+- `SkeletonMapper.cs` maps `RigSnapshot.pose[].segmentId` to `HumanBodyBones` with a default table covering all nine canonical Ananke segments (`head`, `neck`, `thorax`, `abdomen`, `pelvis`, `leftArm`, `rightArm`, `leftLeg`, `rightLeg`).
+- Override any mapping via `AnankeSkeletonConfig` ScriptableObject (create at `Assets/Ananke/Skeleton Config`).
+- `AnankeController.ApplyPoseModifiers` drives `Animator.GetBoneTransform` Z-rotation from `impairmentQ` and `SkinnedMeshRenderer.SetBlendShapeWeight` from the same value.
+- `AnankeCondition` fields (`shockQ`, `consciousnessQ`, etc.) are now included in every sidecar snapshot frame so `InjuryBlend` receives real data.
 
 ---
 

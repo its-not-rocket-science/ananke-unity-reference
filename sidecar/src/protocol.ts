@@ -42,14 +42,25 @@ export interface AnankeGrappleConstraint {
   gripQ: number;
 }
 
+export interface AnankeCondition {
+  shockQ: number;
+  fearQ: number;
+  consciousnessQ: number;
+  fluidLossQ: number;
+  fatigueQ: number;
+  dead: boolean;
+}
+
 export interface AnankeEntitySnapshot {
   entityId: number;
   teamId: number;
   tick: number;
   position: AnankePosition;
+  velocity: AnankePosition;
   animation: AnankeAnimationHints;
   pose: AnankePoseModifier[];
   grapple: AnankeGrappleConstraint;
+  condition: AnankeCondition;
   dead: boolean;
   unconscious: boolean;
 }
