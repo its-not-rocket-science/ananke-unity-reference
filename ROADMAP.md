@@ -48,7 +48,7 @@ Reference segment IDs from `HUMANOID_PLAN` in `@its-not-rocket-science/ananke`:
 
 - When `grapple.isHeld = true`, activate a `RigConstraint` (Animation Rigging package) locking the held entity's root to an attachment point on the holder.
 - `position` field (`"standing"`, `"prone"`, `"pinned"`) selects the constraint target.
-- `gripQ` (0–18000) drives a hand-close blend shape on the holder `SkinnedMeshRenderer`.
+- `gripQ` (0–10000) drives a hand-close blend shape on the holder `SkinnedMeshRenderer`.
 - Constraint released when `grapple.isHeld` becomes false.
 
 ---
@@ -57,7 +57,7 @@ Reference segment IDs from `HUMANOID_PLAN` in `@its-not-rocket-science/ananke`:
 
 - Replace placeholder capsules with fully rigged humanoid characters (Unity Humanoid rig).
 - Canvas overlay with per-entity bars:
-  - Shock bar: `shockQ / 18000f`.
+  - Shock bar: `shockQ / AnankeScale.Q`.
   - Fatigue / fluid loss (polled from extended sidecar endpoint).
   - KO / Dead state indicator.
 - Demo uses `KNIGHT_INFANTRY` vs `HUMAN_BASE` — same setup as the Ananke vertical slice.

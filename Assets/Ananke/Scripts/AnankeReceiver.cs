@@ -5,20 +5,23 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using System.Collections;
-using UnityEngine;
-using UnityEngine.Networking;
 
 namespace Ananke
 {
+    /// <summary>
+    /// Receives AnankeFrameEnvelope messages from the TypeScript sidecar via WebSocket.
+    /// Fires FrameReceived on the Unity main thread each time a new valid frame arrives.
+    /// </summary>
     public class AnankeReceiver : MonoBehaviour
     {
         [Header("WebSocket")]
         [Tooltip("WebSocket endpoint exposed by the TypeScript sidecar.")]
         public string streamUrl = "ws://127.0.0.1:3001/stream";
 
-        [Tooltip("Delay before retrying after a disconnect.")]
+        [Tooltip("Delay in seconds before retrying after a disconnect.")]
         public float reconnectDelaySeconds = 1f;
+
+        public event Action<AnankeFrameEnvelope> FrameReceived;
 
         public AnankeFrameEnvelope LatestFrame { get; private set; }
         public bool IsConnected { get; private set; }
@@ -39,7 +42,12 @@ namespace Ananke
             {
                 try
                 {
-                    LatestFrame = JsonUtility.FromJson<AnankeFrameEnvelope>(payload);
+                    var envelope = JsonUtility.FromJson<AnankeFrameEnvelope>(payload);
+                    if (envelope != null)
+                    {
+                        LatestFrame = envelope;
+                        FrameReceived?.Invoke(envelope);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -118,81 +126,6 @@ namespace Ananke
         {
             _lifetimeCts?.Cancel();
             _lifetimeCts?.Dispose();
-        [Header("Sidecar Connection")]
-        public string sidecarUrl = "http://127.0.0.1:7374";
-        public string frameEndpoint = "/frame";
-        public float pollIntervalSeconds = 0.05f;
-        public int timeoutSeconds = 2;
-        public bool startPollingOnEnable = true;
-
-        public event Action<AnankeFrameEnvelope> FrameReceived;
-
-        public AnankeFrameEnvelope LatestFrame { get; private set; }
-
-        private bool _isPolling;
-
-        private void OnEnable()
-        {
-            if (startPollingOnEnable)
-            {
-                BeginPolling();
-            }
-        }
-
-        private void OnDisable()
-        {
-            CancelInvoke(nameof(PollFrame));
-            _isPolling = false;
-        }
-
-        public void BeginPolling()
-        {
-            if (_isPolling)
-            {
-                return;
-            }
-
-            _isPolling = true;
-            InvokeRepeating(nameof(PollFrame), 0f, pollIntervalSeconds);
-        }
-
-        private void PollFrame()
-        {
-            StartCoroutine(FetchFrame());
-        }
-
-        private IEnumerator FetchFrame()
-        {
-            using var request = UnityWebRequest.Get($"{sidecarUrl}{frameEndpoint}");
-            request.timeout = timeoutSeconds;
-
-            yield return request.SendWebRequest();
-
-            if (request.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogWarning($"[AnankeReceiver] Failed to fetch frame: {request.error}");
-                yield break;
-            }
-
-            AnankeFrameEnvelope envelope;
-            try
-            {
-                envelope = JsonUtility.FromJson<AnankeFrameEnvelope>(request.downloadHandler.text);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AnankeReceiver] Could not parse frame JSON: {ex.Message}");
-                yield break;
-            }
-
-            if (envelope == null || envelope.frames == null)
-            {
-                Debug.LogWarning("[AnankeReceiver] Received empty frame envelope.");
-                yield break;
-            }
-
-            LatestFrame = envelope;
-            FrameReceived?.Invoke(envelope);
         }
     }
 }

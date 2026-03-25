@@ -4,6 +4,10 @@ using UnityEngine;
 
 namespace Ananke
 {
+    /// <summary>
+    /// Double-buffers AnankeEntitySnapshot pairs per entity and computes
+    /// a linearly interpolated snapshot between the two most recent frames.
+    /// </summary>
     public class AnankeInterpolator
     {
         private sealed class BufferedSnapshot
@@ -18,30 +22,33 @@ namespace Ananke
             public BufferedSnapshot Current;
         }
 
+        // Ananke ticks at 20 Hz; interval is 50 ms.
+        private const float DefaultTickIntervalSeconds = 0.05f;
+
         private readonly Dictionary<int, SnapshotPair> _snapshotsByEntity = new();
-        private float _tickIntervalSeconds = 0.05f;
 
         public void PushFrame(AnankeFrameEnvelope envelope, float receivedAt)
         {
-            if (envelope == null || envelope.frames == null)
+            if (envelope?.snapshots == null)
             {
                 return;
             }
 
-            _tickIntervalSeconds = envelope.tickHz > 0 ? 1f / envelope.tickHz : _tickIntervalSeconds;
-
-            foreach (var frame in envelope.frames)
+            foreach (var snapshot in envelope.snapshots)
             {
-                if (!_snapshotsByEntity.TryGetValue(frame.entityId, out var pair))
+                if (snapshot == null)
+                    continue;
+
+                if (!_snapshotsByEntity.TryGetValue(snapshot.entityId, out var pair))
                 {
                     pair = new SnapshotPair();
-                    _snapshotsByEntity[frame.entityId] = pair;
+                    _snapshotsByEntity[snapshot.entityId] = pair;
                 }
 
                 pair.Previous = pair.Current;
                 pair.Current = new BufferedSnapshot
                 {
-                    Snapshot = frame,
+                    Snapshot = snapshot,
                     ReceivedAt = receivedAt,
                 };
             }
@@ -63,7 +70,7 @@ namespace Ananke
             }
 
             var elapsed = Mathf.Max(0f, renderTime - pair.Current.ReceivedAt);
-            var alpha = Mathf.Clamp01(elapsed / Mathf.Max(_tickIntervalSeconds, 0.0001f));
+            var alpha = Mathf.Clamp01(elapsed / DefaultTickIntervalSeconds);
             snapshot = Interpolate(pair.Previous.Snapshot, pair.Current.Snapshot, alpha);
             return true;
         }
@@ -79,7 +86,7 @@ namespace Ananke
                 velocity = AnankePosition.Lerp(previous.velocity, current.velocity, t),
                 animation = AnankeAnimationHints.Lerp(previous.animation, current.animation, t),
                 pose = InterpolatePose(previous.pose, current.pose, t),
-                grapple = AnankeGrapple.Blend(previous.grapple, current.grapple, t),
+                grapple = AnankeGrappleConstraint.Blend(previous.grapple, current.grapple, t),
                 condition = AnankeCondition.Lerp(previous.condition, current.condition, t),
                 dead = t >= 0.5f ? current.dead : previous.dead,
                 unconscious = t >= 0.5f ? current.unconscious : previous.unconscious,
@@ -91,8 +98,12 @@ namespace Ananke
             previous ??= new AnankePoseModifier[0];
             current ??= new AnankePoseModifier[0];
 
-            var previousById = previous.Where(item => item != null && !string.IsNullOrEmpty(item.segmentId)).ToDictionary(item => item.segmentId);
-            var currentById = current.Where(item => item != null && !string.IsNullOrEmpty(item.segmentId)).ToDictionary(item => item.segmentId);
+            var previousById = previous
+                .Where(item => item != null && !string.IsNullOrEmpty(item.segmentId))
+                .ToDictionary(item => item.segmentId);
+            var currentById = current
+                .Where(item => item != null && !string.IsNullOrEmpty(item.segmentId))
+                .ToDictionary(item => item.segmentId);
             var segmentIds = previousById.Keys.Union(currentById.Keys);
 
             var list = new List<AnankePoseModifier>();
